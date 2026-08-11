@@ -1646,12 +1646,16 @@
                             <option value="retail">ขายปลีก</option>
                             <option value="wholesale">ขายส่ง</option>
                         </select></div>
-                    <div class="flex-1"><label class="input-label">สินค้า</label><input type="text" id="filter-product"
-                            list="filter-prod-list" class="input-field py-1 text-base" placeholder="ทั้งหมด"><datalist
-                            id="filter-prod-list"></datalist></div>
-                    <div class="flex-1"><label class="input-label">ลูกค้า</label><input type="text" id="filter-customer"
-                            list="filter-cust-list" class="input-field py-1 text-base" placeholder="ทั้งหมด"><datalist
-                            id="filter-cust-list"></datalist></div>
+                    <div class="flex-1 relative">
+                        <label class="input-label">สินค้า</label>
+                        <input type="text" id="filter-product" class="input-field py-1 text-base" placeholder="ทั้งหมด" autocomplete="off">
+                        <div id="filter-product-dropdown" class="absolute z-50 w-full bg-white border border-gray-200 rounded-b-lg shadow-xl max-h-60 overflow-y-auto hidden mt-1"></div>
+                    </div>
+                    <div class="flex-1 relative">
+                        <label class="input-label">ลูกค้า</label>
+                        <input type="text" id="filter-customer" class="input-field py-1 text-base" placeholder="ทั้งหมด" autocomplete="off">
+                        <div id="filter-customer-dropdown" class="absolute z-50 w-full bg-white border border-gray-200 rounded-b-lg shadow-xl max-h-60 overflow-y-auto hidden mt-1"></div>
+                    </div>
                     <button onclick="renderStats()"
                         class="bg-blue-600 text-white px-6 py-2 rounded font-bold hover:bg-blue-700 text-lg">แสดงผล</button>
                 </div>
@@ -2817,6 +2821,58 @@
             qa: { page: 1, limit: 5 }
         };
 
+        // --- CUSTOM DROPDOWN (AUTOCOMPLETE) ---
+        function setupAutocomplete(inputId, dropdownId, dataCallback) {
+            const input = document.getElementById(inputId);
+            const dropdown = document.getElementById(dropdownId);
+            if (!input || !dropdown) return;
+
+            function renderDropdown(filterText = '') {
+                const data = dataCallback(); // ดึงข้อมูลล่าสุดจากฐานข้อมูล
+                // กรองข้อมูลด้วยคำที่พิมพ์ (ไม่สนพิมพ์เล็กใหญ่)
+                const filtered = data.filter(item => String(item).toLowerCase().includes(String(filterText).toLowerCase()));
+                
+                if (filtered.length === 0) {
+                    dropdown.innerHTML = '<div class="p-3 text-sm text-gray-400 text-center">ไม่พบรายการ</div>';
+                } else {
+                    dropdown.innerHTML = filtered.map(item => {
+                        // ป้องกันโค้ดพังกรณีชื่อสินค้ามีเครื่องหมายคำพูด (' หรือ ")
+                        const safeItem = String(item).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                        return `<div class="p-3 text-base text-gray-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer border-b border-gray-100 transition" 
+                                 onclick="selectAutocompleteItem('${inputId}', '${dropdownId}', '${safeItem}')">
+                                ${item}
+                            </div>`;
+                    }).join('');
+                }
+                dropdown.classList.remove('hidden');
+            }
+
+            // จัดการ Event นิ้วจิ้มและพิมพ์
+            input.addEventListener('focus', () => renderDropdown(input.value));
+            input.addEventListener('click', () => renderDropdown(input.value));
+            input.addEventListener('input', (e) => renderDropdown(e.target.value));
+
+            // ปิดกล่องเมื่อคลิกที่อื่นบนหน้าจอ
+            document.addEventListener('click', (e) => {
+                if (e.target !== input && !dropdown.contains(e.target)) {
+                    dropdown.classList.add('hidden');
+                }
+            });
+        }
+
+        function selectAutocompleteItem(inputId, dropdownId, value) {
+            const input = document.getElementById(inputId);
+            const dropdown = document.getElementById(dropdownId);
+            if(input) {
+                // แก้ปัญหา HTML Entity ก่อนใส่กลับเข้า Input
+                const txt = document.createElement("textarea");
+                txt.innerHTML = value;
+                input.value = txt.value;
+                input.dispatchEvent(new Event('change')); // กระตุ้นให้ระบบรับรู้การเปลี่ยนค่า
+            }
+            if(dropdown) dropdown.classList.add('hidden');
+        }
+
         // --- HELPERS (Safe Math & Utils) ---
         const SM = {
             add: (a, b) => parseFloat((a + b).toFixed(4)),
@@ -2920,7 +2976,16 @@
         }
 
         // --- GLOBAL & INIT ---
-        document.addEventListener('DOMContentLoaded', () => { initData(); initSplash(); setupDefaults(); renderAll(); });
+        document.addEventListener('DOMContentLoaded', () => { 
+            initData(); 
+            initSplash(); 
+            setupDefaults(); 
+            renderAll(); 
+
+            // 🌟 ผูกระบบ Custom Dropdown กับช่องกรอกในแท็บ 4
+            setupAutocomplete('filter-product', 'filter-product-dropdown', () => state.inv.filter(i => !i.deleted).map(i => i.p));
+            setupAutocomplete('filter-customer', 'filter-customer-dropdown', () => state.customers);
+        });
 
         function initData() {
             try {
@@ -8102,18 +8167,6 @@
         let salesChartInstance = null;
 
         function renderStats() {
-            // 🌟 [อัปเดตตัวเลือก Dropdown] สำหรับช่องฟิลเตอร์สินค้าและลูกค้า
-            const filterProdList = document.getElementById('filter-prod-list');
-            if (filterProdList) {
-                // ดึงรายชื่อสินค้าที่ยังไม่ถูกลบ มาสร้างเป็นตัวเลือก
-                filterProdList.innerHTML = state.inv.filter(i => !i.deleted).map(i => `<option value="${i.p}">`).join('');
-            }
-            const filterCustList = document.getElementById('filter-cust-list');
-            if (filterCustList) {
-                // ดึงรายชื่อลูกค้าทั้งหมดมาสร้างเป็นตัวเลือก
-                filterCustList.innerHTML = state.customers.map(c => `<option value="${c}">`).join('');
-            }
-
             // 🌟 [ส่วนที่เพิ่มใหม่] ดึงข้อมูล Accounting Period มากรองข้อมูลก่อนนำไปคำนวณ
             let acc = state.accPeriod || { active: false, date: '', startBalance: 0 };
             
