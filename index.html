@@ -2083,7 +2083,7 @@
     <div id="tx-category-modal" class="modal-overlay" onclick="closeTxCategoryModalSafe()" style="z-index: 3000;">
         <div class="modal-content" style="max-width: 500px;" onclick="event.stopPropagation()">
             <div class="p-4 border-b flex justify-between bg-blue-50 rounded-t-xl">
-                <h3 class="font-bold text-blue-800"><i class="fas fa-tags mr-2"></i>จัดการหมวดหมู่ธุระกรรม</h3>
+                <h3 class="font-bold text-blue-800"><i class="fas fa-tags mr-2"></i>จัดการหมวดหมู่ธุรกรรม</h3>
                 <button onclick="closeTxCategoryModalSafe()"><i class="fas fa-times"></i></button>
             </div>
             <div class="p-4">
@@ -5549,20 +5549,24 @@
                     const titleEl = document.getElementById(`widget-title-${widgetId}`);
                     if(titleEl) titleEl.innerHTML = '<i class="fas fa-chart-pie text-green-600"></i> สัดส่วนรายรับ';
                     
-                } else if (chartType === 'expense_pie') { // <--- จุดที่เกิดปัญหาครั้งก่อน ผมแก้เป็น else if ให้แล้วครับ
-                    dataMap['ต้นทุนสินค้ารับเข้า'] = 0;
-                    stocks.forEach(b => { 
-                        if (!b) return;
-                        dataMap['ต้นทุนสินค้ารับเข้า'] += parseFloat(b.finalTotal !== undefined ? b.finalTotal : b.total) || 0; 
-                    });
-                    
-                    txs.forEach(tx => {
-                        if (!tx) return;
-                        if(tx.type === 'withdraw' || !tx.type) { 
-                            let cat = tx.category || 'ทั่วไป (ถอน)';
-                            dataMap[cat] = (dataMap[cat] || 0) + (parseFloat(tx.amount) || 0);
-                        }
-                    });
+                } else if (chartType === 'expense_pie') {
+                        dataMap['ต้นทุนสินค้ารับเข้า'] = 0;
+                        stocks.forEach(b => { 
+                            if (!b) return;
+                            dataMap['ต้นทุนสินค้ารับเข้า'] += parseFloat(b.finalTotal !== undefined ? b.finalTotal : b.total) || 0; 
+                        });
+                        
+                        txs.forEach(tx => {
+                            if (!tx) return;
+                            
+                            // 🛑 ป้องกันเบิ้ล: ข้ามรายการที่ระบบสร้างออโต้ตอนซื้อสต็อก (PAY-) เพราะนับไปแล้วด้านบน
+                            if (tx.id && String(tx.id).startsWith('PAY-')) return;
+                            
+                            if(tx.type === 'withdraw' || !tx.type) { 
+                                let cat = tx.category || 'ทั่วไป (ถอน)';
+                                dataMap[cat] = (dataMap[cat] || 0) + (parseFloat(tx.amount) || 0);
+                            }
+                        });
                     
                     bgColors = ['#ef4444', '#f97316', '#f43f5e', '#ec4899', '#8b5cf6', '#64748b', '#dc2626', '#ea580c'];
                     const titleEl = document.getElementById(`widget-title-${widgetId}`);
@@ -5597,6 +5601,9 @@
                             incMap[catName] = (incMap[catName] || 0) + (parseFloat(tx.amount) || 0);
                         } 
                         else if(tx.type === 'withdraw' || !tx.type) {
+                            // 🛑 ป้องกันเบิ้ล: ข้ามรายการซื้อสต็อกออโต้เช่นเดียวกัน
+                            if (tx.id && String(tx.id).startsWith('PAY-')) return;
+                            
                             let catName = cat || 'ทั่วไป (ถอน)';
                             expMap[catName] = (expMap[catName] || 0) + Math.abs(parseFloat(tx.amount) || 0);
                         }
