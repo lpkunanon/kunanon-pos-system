@@ -2045,7 +2045,7 @@
             <div class="bg-purple-50 text-purple-800 p-3 rounded-lg border border-purple-200 mb-4 shadow-sm text-sm flex flex-col gap-2">
                 <div class="flex items-start gap-2">
                     <i class="fas fa-plus-circle text-purple-600 text-lg mt-0.5"></i>
-                    <span><b>ยืมเงิน / แปะโป้ง:</b> บวกเงินชดเชยเข้ากระเป๋า (แก้สมการเวลาค้างค่าของ)</span>
+                    <span><b>ยืมเงิน:</b> บวกเงินชดเชยเข้ากระเป๋า (แก้สมการเวลาค้างค่าของ)</span>
                 </div>
                 <div class="flex items-start gap-2">
                     <i class="fas fa-minus-circle text-purple-600 text-lg mt-0.5"></i>
@@ -5182,8 +5182,8 @@
             
             state.accPeriod = {
                 active: isActive,
-                date: isActive ? dateVal : '',
-                startBalance: isActive ? balVal : 0
+                date: dateVal, // 🌟 แก้: บันทึกค่าไว้เสมอ แม้สวิตช์จะปิดอยู่ก็ตาม
+                startBalance: balVal // 🌟 แก้: บันทึกค่าไว้เสมอ
             };
             
             saveAll();
@@ -5554,16 +5554,15 @@
                     
                 } else if (chartType === 'expense_pie') {
                         dataMap['ต้นทุนสินค้ารับเข้า'] = 0;
-                        stocks.forEach(b => { 
-                            if (!b) return;
-                            dataMap['ต้นทุนสินค้ารับเข้า'] += parseFloat(b.finalTotal !== undefined ? b.finalTotal : b.total) || 0; 
-                        });
                         
                         txs.forEach(tx => {
                             if (!tx) return;
                             
-                            // 🛑 ป้องกันเบิ้ล: ข้ามรายการที่ระบบสร้างออโต้ตอนซื้อสต็อก (PAY-) เพราะนับไปแล้วด้านบน
-                            if (tx.id && String(tx.id).startsWith('PAY-')) return;
+                            // 🌟 นำ PAY- ไปบวกเป็นต้นทุนสินค้าแทน แล้วข้ามการทำงานบรรทัดถัดไป
+                            if (tx.id && String(tx.id).startsWith('PAY-')) {
+                                dataMap['ต้นทุนสินค้ารับเข้า'] += (parseFloat(tx.amount) || 0);
+                                return;
+                            }
                             
                             if(tx.type === 'withdraw' || !tx.type) { 
                                 let cat = tx.category || 'ทั่วไป (ถอน)';
@@ -5585,17 +5584,18 @@
                     sales.forEach(b => { 
                         if (b) incMap['ยอดขายสินค้า'] += parseFloat(b.finalTotal !== undefined ? b.finalTotal : b.total) || 0; 
                     });
-                    // รวบรวมรายจ่าย
-                    stocks.forEach(b => { 
-                        if (b) expMap['ต้นทุนสินค้ารับเข้า'] += parseFloat(b.finalTotal !== undefined ? b.finalTotal : b.total) || 0; 
-                    });
-                    
-                    // รวบรวมจากประวัติการฝาก/ถอน
-                    txs.forEach(tx => {
-                        if (!tx) return;
-                        let cat = tx.category || '';
-                        
-                        // 🌟 ดักจับระบบกระปุกออมสินแยกออกมาต่างหาก
+                    // รวบรวมจากประวัติการฝาก/ถอน (ดึงรายจ่ายค่าสต็อกมาด้วยเลย)
+                        txs.forEach(tx => {
+                            if (!tx) return;
+                            let cat = tx.category || '';
+                            
+                            // 🌟 รวมต้นทุนสินค้าจาก PAY- เข้า expMap โดยตรง
+                            if (tx.id && String(tx.id).startsWith('PAY-')) {
+                                expMap['ต้นทุนสินค้ารับเข้า'] += (parseFloat(tx.amount) || 0);
+                                return;
+                            }
+
+                            // 🌟 ดักจับระบบกระปุกออมสินแยกออกมาต่างหาก
                         if (cat === 'โอนเข้ากระปุก' || cat === 'โอนออกกระปุก' || cat === 'ถอนจากกระปุกโดยตรง') {
                             transferMap[cat] = (transferMap[cat] || 0) + Math.abs(parseFloat(tx.amount) || 0);
                         } 
@@ -8186,10 +8186,10 @@
 
             if (acc.active && acc.date) {
                 const cutOff = new Date(acc.date);
-                // 🌟 เอาระบบบังคับเริ่มเที่ยงคืนออก เพื่อให้นับเวลาตรงเป๊ะตามที่เลือก
+                // 🌟 ใช้ .created ที่มีข้อมูลเวลาเป๊ะๆ มาเป็นตัวคัดกรอง (ถ้าบิลเก่ามากๆ ไม่มี ให้ถอยไปใช้ .date แทน)
                 
-                baseSales = baseSales.filter(b => new Date(b.date) >= cutOff);
-                baseStocks = baseStocks.filter(b => new Date(b.date) >= cutOff);
+                baseSales = baseSales.filter(b => new Date(b.created || b.date) >= cutOff);
+                baseStocks = baseStocks.filter(b => new Date(b.created || b.date) >= cutOff);
                 baseWithdrawals = baseWithdrawals.filter(w => new Date(w.date) >= cutOff);
             }
 
@@ -8326,10 +8326,13 @@
             });
 
             // 2. รวมยอดซื้อสต็อกทั้งหมดในรอบบัญชี (เงินออก)
+            // 🌟 แก้ตามไอเดียคุณ! ดึงยอดลงทุนจากประวัติจ่ายเงิน (PAY-) ที่มีเวลาบันทึกตรงเป๊ะ
             let lifeStockPurchases = 0;
-            if (baseStocks) { // 🌟 ใช้ baseStocks
-                baseStocks.forEach(b => {
-                    lifeStockPurchases += (b.finalTotal !== undefined) ? b.finalTotal : b.total;
+            if (baseWithdrawals) {
+                baseWithdrawals.forEach(w => {
+                    if (w.id && String(w.id).startsWith('PAY-')) {
+                        lifeStockPurchases += (parseFloat(w.amount) || 0);
+                    }
                 });
             }
 
